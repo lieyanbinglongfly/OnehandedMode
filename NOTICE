@@ -1,0 +1,24 @@
+This project references the following projects:
+
+Android Open Source Project — Apache License 2.0.
+https://android.googlesource.com/platform/frameworks/base/
+https://android.googlesource.com/platform/packages/apps/Launcher3/
+The module hooks the installed platform implementation. No AOSP repository is vendored.
+
+libxposed API and service — Apache License 2.0.
+https://github.com/libxposed/api
+https://github.com/libxposed/service
+
+Miuix — compose-miuix-ui contributors, Apache License 2.0.
+https://github.com/YuKongA/miuix
+
+Mishka UI guidelines and blur composition reference — YuKongA.
+https://github.com/YuKongA/Mishka/blob/main/docs/ui-guidelines.md
+
+MiuiBackGestureHook architecture and modern Xposed configuration reference —
+wxxsfxyzm and contributors, Apache License 2.0.
+https://github.com/wxxsfxyzm/MiuiBackGestureHook
+
+The About screen material/background is adapted from YuKongA/Mishka under GPL-3.0.
+The GPL-3.0 license is included in LICENSE.
+Changes include a module-specific hero, links, responsive layout and Android 12 rendering.

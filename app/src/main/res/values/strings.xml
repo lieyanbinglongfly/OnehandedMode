@@ -1,0 +1,32 @@
+<resources>
+    <string name="app_name">One-handed mode</string>
+    <string name="module_description">Improve one-handed mode on Android 12+</string>
+    <string name="settings">One-handed mode settings</string>
+    <string name="scale">Scale</string>
+    <string name="choose_scale">Choose scale</string>
+    <string name="preset_scale">Presets</string>
+    <string name="custom_scale">Custom</string>
+    <string name="about">About</string>
+    <string name="help">How to use</string>
+    <string name="back">Back</string>
+    <string name="status_ready">Module ready</string>
+    <string name="status_inactive">Xposed inactive</string>
+    <string name="status_unsupported">One-handed mode unavailable</string>
+    <string name="status_checking">Checking status</string>
+    <string name="status_checking_summary">Checking system support and Xposed activation</string>
+    <string name="status_system_supported">System one-handed mode: supported</string>
+    <string name="status_system_unsupported">System one-handed mode: unsupported</string>
+    <string name="status_xposed_active">Xposed: active</string>
+    <string name="status_xposed_inactive">Xposed: inactive</string>
+    <string name="status_activate_hint">Enable the module in LSPosed, select System Framework and SystemUI, then restart your device.</string>
+    <string name="help_enter">Enter one-handed mode</string>
+    <string name="help_enter_body">With gesture navigation enabled, swipe down from the bottom gesture bar while your device is unlocked and in portrait orientation.\n\nSwipe down on the left half to anchor the screen at the bottom left, or on the right half to anchor it at the bottom right.</string>
+    <string name="help_exit">Exit one-handed mode</string>
+    <string name="help_exit_body">Tap the blank area outside the scaled screen to exit, or swipe up from the bottom gesture bar as in AOSP one-handed mode.\n\nTap the settings button in the blank area to open this app. Rotating the screen or turning it off also exits one-handed mode.</string>
+    <string name="help_scale">Adjust the scale</string>
+    <string name="help_scale_body" formatted="false">The scale is the width and height of the smaller screen as a percentage of the original. At 70%, both dimensions are 70% of their original size. The content and corner radius scale proportionally.\n\nThe presets are 80%, 70%, and 60%. A smaller value brings more of the screen within reach. Choose Custom to adjust the scale from 20% to 90%. Changes apply the next time you enter one-handed mode. If it is already active, it exits and re-enters automatically.</string>
+    <string name="open_source">Open source</string>
+    <string name="project">Project</string>
+    <string name="project_source">Source code</string>
+    <string name="version">Version</string>
+</resources>

@@ -2,13 +2,16 @@ package io.githuh.onehandedmode.hook
 
 import android.annotation.SuppressLint
 import android.app.KeyguardManager
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PointF
+import android.graphics.Matrix
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Handler
@@ -28,6 +31,7 @@ import kotlin.math.roundToInt
 internal class HandyRuntime(
     private val controller: Any,
     private val preferences: SharedPreferences,
+    private val backgroundParent: () -> SurfaceControl?,
 ) : DisplayManager.DisplayListener {
     private val context = controller.read("mContext") as Context
     private val handler = controller.read("mMainHandler") as Handler
@@ -164,6 +168,40 @@ internal class HandyRuntime(
         return false
     }
 
+    fun isOneHandedActive(): Boolean = state == 2
+
+    fun mapFreeformInput(event: MotionEvent) {
+        val visualScale = 1f - lastSurroundOffset / screen.height
+        val x = if (right) screen.width * (1f - visualScale) else 0f
+        val inverse = Matrix().apply {
+            setValues(floatArrayOf(
+                1f / visualScale, 0f, -x / visualScale,
+                0f, 1f / visualScale, -lastSurroundOffset / visualScale,
+                0f, 0f, 1f,
+            ))
+        }
+        event.transform(inverse)
+    }
+
+    fun freeformPointToDisplay(x: Float, y: Float): PointF {
+        val visualScale = 1f - lastSurroundOffset / screen.height
+        val offset = if (right) screen.width * (1f - visualScale) else 0f
+        return PointF(x * visualScale + offset, y * visualScale + lastSurroundOffset)
+    }
+
+    @Suppress("DEPRECATION")
+    fun hasVisibleFreeformTask(): Boolean {
+        val taskInfo = Class.forName("android.app.TaskInfo")
+        val configuration = taskInfo.getField("configuration")
+        val visible = taskInfo.getField("isVisible")
+        val windowConfiguration = Configuration::class.java.getField("windowConfiguration")
+        val mode = Class.forName("android.app.WindowConfiguration").getDeclaredMethod("getWindowingMode")
+        return context.getSystemService(ActivityManager::class.java).getRunningTasks(Int.MAX_VALUE).any { task ->
+            visible.getBoolean(task) &&
+                mode.invoke(windowConfiguration.get(configuration.get(task))) == 5
+        }
+    }
+
     private fun requestExit() {
         if (state == 1) {
             exitPending = true
@@ -178,8 +216,8 @@ internal class HandyRuntime(
                 lastSurroundOffset = Float.NaN
                 entryTime = SystemClock.elapsedRealtime()
                 val color = backgroundColor()
-                background.prepare(screen, color)
-                overlay.show(screen, scale, right, color)
+                background.prepare(screen, color, backgroundParent())
+                overlay.show(screen, scale, right, color, cornerRadius)
                 publishMode(if (right) 2 else 1)
             }
             2 -> {
@@ -238,7 +276,6 @@ internal class HandyRuntime(
         corner.invoke(tx, leash, cornerRadius)
         if (y != lastSurroundOffset) {
             lastSurroundOffset = y
-            overlay.update(y, screen.width * (1f - currentScale))
         }
         return PointF(x, y)
     }

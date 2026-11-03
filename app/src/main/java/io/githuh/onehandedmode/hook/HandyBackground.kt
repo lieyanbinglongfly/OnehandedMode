@@ -23,8 +23,9 @@ internal class HandyBackground {
     private val show = SurfaceControl.Transaction::class.java.getDeclaredMethod("show", SurfaceControl::class.java)
     private val remove = SurfaceControl.Transaction::class.java.getDeclaredMethod("remove", SurfaceControl::class.java)
 
-    fun prepare(screen: ScreenSpec, backgroundColor: Int) {
-        val builder = SurfaceControl.Builder().setName("MIUI one-handed background").setOpaque(true)
+    fun prepare(screen: ScreenSpec, backgroundColor: Int, parent: SurfaceControl?) {
+        val builder = SurfaceControl.Builder().setName("MIUI one-handed background")
+            .setParent(parent).setOpaque(true)
         colorLayer.invoke(builder)
         surface = builder.build()
         width = screen.width

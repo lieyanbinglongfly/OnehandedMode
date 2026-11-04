@@ -6,6 +6,8 @@
     <string name="choose_scale">选择缩放比例</string>
     <string name="preset_scale">预设比例</string>
     <string name="custom_scale">自定义比例</string>
+    <string name="keep_navigation_gestures">保留桌面与多任务手势</string>
+    <string name="keep_navigation_gestures_summary">开启后，上滑返回桌面或进入多任务，单手模式保持开启。关闭后，上滑退出单手模式。</string>
     <string name="about">关于</string>
     <string name="help">使用说明</string>
     <string name="back">返回</string>
@@ -20,9 +22,9 @@
     <string name="status_xposed_inactive">Xposed：未激活</string>
     <string name="status_activate_hint">请在 LSPosed 中启用模块，勾选系统框架与 SystemUI 后重启。</string>
     <string name="help_enter">呼出单手模式</string>
-    <string name="help_enter_body">使用手势导航，在解锁后的竖屏界面，从底部小白条区域向下滑动即可进入。\n\n左半侧下拉时贴左下角，右半侧下拉时贴右下角。</string>
+    <string name="help_enter_body">使用手势导航，在解锁后的竖屏界面，从底部小白条区域向下滑动即可进入。小米设备隐藏小白条后，仍可从屏幕底部的手势区域向下滑动呼出。\n\n左半侧下拉时贴左下角，右半侧下拉时贴右下角。</string>
     <string name="help_exit">退出单手模式</string>
-    <string name="help_exit_body">点击缩小画面外的空白处即可退出，也可以像 AOSP 原生单手模式一样，从底部小白条向上滑动。\n\n点击空白区域的设置按钮可打开本应用。旋转屏幕或熄屏也会退出。</string>
+    <string name="help_exit_body">点击缩小画面外的空白处即可退出，默认也可以从底部小白条向上滑动退出。\n\n开启“保留桌面与多任务手势”后，上滑会返回桌面或进入多任务，单手模式保持开启，此时可点击空白处退出。\n\n点击空白区域的设置按钮可打开本应用。旋转屏幕或熄屏也会退出。</string>
     <string name="help_scale">比例调节</string>
     <string name="help_scale_body" formatted="false">比例表示缩小后画面的宽和高占原屏幕的百分比。例如 70% 表示宽和高均为原来的 70%，画面和圆角会等比缩小。\n\n预设比例为 80%、70%、60%。比例越小，单手可触及的范围越集中。选择“自定义比例”后，可以在 20%–90% 之间调整。修改后下次呼出生效；在单手模式内修改会自动退出并重新进入。</string>
     <string name="open_source">开源项目</string>

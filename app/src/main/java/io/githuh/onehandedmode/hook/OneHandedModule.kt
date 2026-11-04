@@ -2,6 +2,7 @@ package io.githuh.onehandedmode.hook
 
 import android.animation.ValueAnimator
 import android.animation.Animator
+import android.app.Application
 import android.content.ContentResolver
 import android.os.Build
 import android.provider.Settings
@@ -23,17 +24,12 @@ class OneHandedModule : XposedModule() {
     private lateinit var runtime: HandyRuntime
     private var screenshotBackgroundParent: SurfaceControl? = null
     private var freeformCoexistEnabled = false
-    private var isSystemUiProcess = false
+    private var systemUiHooksInstalled = false
+    private var platformSupportInstalled = false
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
-        isSystemUiProcess = param.processName == "com.android.systemui"
-        if (param.isSystemServer || isSystemUiProcess) {
-            val properties = Class.forName("android.os.SystemProperties")
-            hook(properties.getDeclaredMethod("getBoolean", String::class.java, Boolean::class.javaPrimitiveType))
-                .intercept { chain ->
-                    if (chain.getArg(0) == "ro.support_one_handed_mode") true else chain.proceed()
-                }
-        }
+        log(Log.INFO, "OneHandedMode", "Module loaded: process=${param.processName}, systemServer=${param.isSystemServer}")
+        if (param.isSystemServer || param.processName == "com.android.systemui") enablePlatformSupport()
     }
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
@@ -47,7 +43,12 @@ class OneHandedModule : XposedModule() {
             OplusFreeformCoexist.isTargetSystem()) {
             OplusFreeformCoexist(this, param.classLoader).installSidebar()
         }
-        if (!isSystemUiProcess || param.packageName != "com.android.systemui" || !param.isFirstPackage) return
+        if (param.packageName != "com.android.systemui" || systemUiHooksInstalled) return
+        val process = Application.getProcessName()
+        log(Log.INFO, "OneHandedMode", "SystemUI package ready: process=$process, firstPackage=${param.isFirstPackage}")
+        if (process != "com.android.systemui") return
+        systemUiHooksInstalled = true
+        enablePlatformSupport()
 
         val loader = param.classLoader
         val preferences = getRemotePreferences(HandySettings.GROUP)
@@ -93,7 +94,8 @@ class OneHandedModule : XposedModule() {
             val shouldStop = when (reason) {
                 2, 3, 6 -> false // The surround owns outside touches; keyboard/timeout keep the mode.
                 // Coexistence keeps task/focus changes from terminating one-handed mode.
-                5 -> !freeformCoexistEnabled && runtime.hasVisibleFreeformTask()
+                5 -> !preferences.getBoolean(HandySettings.KEEP_NAVIGATION_GESTURES, false) &&
+                    !freeformCoexistEnabled && runtime.hasVisibleFreeformTask()
                 else -> true
             }
             if (OplusFreeformCoexist.isTargetSystem()) {
@@ -188,6 +190,18 @@ class OneHandedModule : XposedModule() {
             freeformCoexistEnabled = true
         }
         log(Log.INFO, "OneHandedMode", "Hooks installed at framework and callback boundaries")
+        NavigationGestureMode(this, loader, preferences).install()
+        log(Log.INFO, "OneHandedMode", "Navigation gesture hooks installed")
+    }
+
+    private fun enablePlatformSupport() {
+        if (platformSupportInstalled) return
+        val properties = Class.forName("android.os.SystemProperties")
+        hook(properties.getDeclaredMethod("getBoolean", String::class.java, Boolean::class.javaPrimitiveType))
+            .intercept { chain ->
+                if (chain.getArg(0) == "ro.support_one_handed_mode") true else chain.proceed()
+            }
+        platformSupportInstalled = true
     }
 
     companion object {

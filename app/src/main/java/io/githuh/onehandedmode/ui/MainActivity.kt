@@ -40,6 +40,7 @@ import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.RadioButtonLocation
 import top.yukonga.miuix.kmp.preference.RadioButtonPreference
 import top.yukonga.miuix.kmp.preference.SliderPreference
+import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
 import top.yukonga.miuix.kmp.nav.core.NavKey
 import top.yukonga.miuix.kmp.nav.core.NavDisplay
@@ -130,11 +131,15 @@ private fun HomeScreen(
     var custom by remember(preferences) {
         mutableIntStateOf(preferences?.getInt(HandySettings.CUSTOM, HandySettings.DEFAULT_PERCENT) ?: HandySettings.DEFAULT_PERCENT)
     }
+    var keepNavigationGestures by remember(preferences) {
+        mutableStateOf(preferences?.getBoolean(HandySettings.KEEP_NAVIGATION_GESTURES, false) ?: false)
+    }
     DisposableEffect(preferences) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, _ ->
             mode = prefs.getInt(HandySettings.MODE, 0)
             preset = prefs.getInt(HandySettings.PRESET, HandySettings.DEFAULT_PERCENT)
             custom = prefs.getInt(HandySettings.CUSTOM, HandySettings.DEFAULT_PERCENT)
+            keepNavigationGestures = prefs.getBoolean(HandySettings.KEEP_NAVIGATION_GESTURES, false)
         }
         preferences?.registerOnSharedPreferenceChangeListener(listener)
         onDispose { preferences?.unregisterOnSharedPreferenceChangeListener(listener) }
@@ -192,6 +197,22 @@ private fun HomeScreen(
                         },
                     )
                 }
+            }
+        }
+        item { Spacer(Modifier.height(12.dp)) }
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                SwitchPreference(
+                    title = stringResource(R.string.keep_navigation_gestures),
+                    summary = stringResource(R.string.keep_navigation_gestures_summary),
+                    checked = keepNavigationGestures,
+                    onCheckedChange = { checked ->
+                        keepNavigationGestures = checked
+                        preferences!!.edit().putBoolean(HandySettings.KEEP_NAVIGATION_GESTURES, checked).apply()
+                    },
+                    insideMargin = PreferencePadding,
+                    enabled = preferences != null,
+                )
             }
         }
         item { Spacer(Modifier.height(12.dp)) }

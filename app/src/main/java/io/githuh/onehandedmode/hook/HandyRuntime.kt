@@ -52,6 +52,7 @@ internal class HandyRuntime(
     private var entryTime = 0L
     private var lastSurroundOffset = Float.NaN
     private var cornerRadius = 0f
+    private var hiddenBarGesture: XiaomiHiddenBarGesture? = null
 
     private val matrix = SurfaceControl.Transaction::class.java.getDeclaredMethod(
         "setMatrix", SurfaceControl::class.java,
@@ -97,6 +98,15 @@ internal class HandyRuntime(
         preferences.registerOnSharedPreferenceChangeListener(preferenceListener)
         context.getSystemService(DisplayManager::class.java).registerDisplayListener(this, handler)
         context.registerReceiver(screenReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF), null, handler)
+        if (Build.VERSION.SDK_INT == 37 && Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)) {
+            val pilfer = Class.forName("android.view.InputMonitor").getDeclaredMethod("pilferPointers")
+            hiddenBarGesture = XiaomiHiddenBarGesture(
+                context, handler,
+                canStart = { state == 0 && canEnter() },
+                pilferPointers = { pilfer.invoke(controller.read("mTouchHandler")!!.read("mInputMonitor")); Unit },
+                startOneHanded = { controller.call("startOneHanded"); Unit },
+            )
+        }
         handler.post { applySettings() }
     }
 
@@ -137,10 +147,7 @@ internal class HandyRuntime(
     }
 
     fun prepareEntry(): Boolean {
-        if (display.rotation != Surface.ROTATION_0) return false
-        if (context.resources.configuration.smallestScreenWidthDp >= 600) return false
-        if (context.getSystemService(KeyguardManager::class.java).isKeyguardLocked) return false
-        if (Settings.Global.getInt(context.contentResolver, Settings.Global.DEVICE_PROVISIONED, 0) == 0) return false
+        if (!canEnter()) return false
         if (state == 2) {
             requestExit()
             return false
@@ -159,6 +166,11 @@ internal class HandyRuntime(
         right = downX >= screen.width / 2f
         return true
     }
+
+    private fun canEnter(): Boolean = display.rotation == Surface.ROTATION_0 &&
+        context.resources.configuration.smallestScreenWidthDp < 600 &&
+        !context.getSystemService(KeyguardManager::class.java).isKeyguardLocked &&
+        Settings.Global.getInt(context.contentResolver, Settings.Global.DEVICE_PROVISIONED, 0) != 0
 
     fun deferExit(): Boolean {
         if (state == 1) {
@@ -263,6 +275,7 @@ internal class HandyRuntime(
 
     fun onMotionEvent(event: MotionEvent) {
         if (state == 0 && event.actionMasked == MotionEvent.ACTION_DOWN) downX = event.rawX
+        hiddenBarGesture?.onMotionEvent(event, screen.height)
     }
 
     fun transform(tx: SurfaceControl.Transaction, leash: SurfaceControl, offset: Float): PointF {

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.Saver
@@ -334,14 +335,17 @@ private fun HelpScreen(onBack: () -> Unit) {
         R.string.help_enter to R.string.help_enter_body,
         R.string.help_exit to R.string.help_exit_body,
         R.string.help_scale to R.string.help_scale_body,
+        R.string.help_external to R.string.help_external_body,
     )
     SettingsScaffold(title = stringResource(R.string.help), onBack = onBack) {
         sections.forEach { (title, body) ->
             item { SectionTitle(stringResource(title)) }
             item {
                 Card(Modifier.fillMaxWidth()) {
-                    Text(stringResource(body), modifier = Modifier.padding(ContentInset),
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 15.sp, lineHeight = 24.sp)
+                    SelectionContainer(Modifier.fillMaxWidth()) {
+                        Text(stringResource(body), modifier = Modifier.padding(ContentInset),
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 15.sp, lineHeight = 24.sp)
+                    }
                 }
             }
         }

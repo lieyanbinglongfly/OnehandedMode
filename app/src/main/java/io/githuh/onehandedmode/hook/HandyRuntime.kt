@@ -74,6 +74,14 @@ internal class HandyRuntime(
             requestExit()
         }
     }
+    private val externalStartReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            // START is idempotent: repeated requests must not toggle an active mode off.
+            if (state != 0) return
+            downX = if (intent.getStringExtra("side") == "left") 0f else screen.width.toFloat()
+            controller.call("startOneHanded")
+        }
+    }
 
     fun attach() {
         // The organizer is fully initialized here, including in R8-inlined factories.
@@ -98,6 +106,12 @@ internal class HandyRuntime(
         preferences.registerOnSharedPreferenceChangeListener(preferenceListener)
         context.getSystemService(DisplayManager::class.java).registerDisplayListener(this, handler)
         context.registerReceiver(screenReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF), null, handler)
+        val startFilter = IntentFilter("io.githuh.onehandedmode.action.START")
+        if (Build.VERSION.SDK_INT >= 33) {
+            context.registerReceiver(externalStartReceiver, startFilter, null, handler, Context.RECEIVER_EXPORTED)
+        } else {
+            context.registerReceiver(externalStartReceiver, startFilter, null, handler)
+        }
         if (Build.VERSION.SDK_INT == 37 && Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)) {
             val pilfer = Class.forName("android.view.InputMonitor").getDeclaredMethod("pilferPointers")
             hiddenBarGesture = XiaomiHiddenBarGesture(

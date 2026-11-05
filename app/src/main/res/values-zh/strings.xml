@@ -27,6 +27,8 @@
     <string name="help_exit_body">点击缩小画面外的空白处即可退出，默认也可以从底部小白条向上滑动退出。\n\n开启“保留桌面与多任务手势”后，上滑会返回桌面或进入多任务，单手模式保持开启，此时可点击空白处退出。\n\n点击空白区域的设置按钮可打开本应用。旋转屏幕或熄屏也会退出。</string>
     <string name="help_scale">比例调节</string>
     <string name="help_scale_body" formatted="false">比例表示缩小后画面的宽和高占原屏幕的百分比。例如 70% 表示宽和高均为原来的 70%，画面和圆角会等比缩小。\n\n预设比例为 80%、70%、60%。比例越小，单手可触及的范围越集中。选择“自定义比例”后，可以在 20%–90% 之间调整。修改后下次呼出生效；在单手模式内修改会自动退出并重新进入。</string>
+    <string name="help_external">外部应用呼出</string>
+    <string name="help_external_body">启用模块并重启后，其他应用可向 com.android.systemui 包发送 action 为 io.githuh.onehandedmode.action.START 的广播。发送方无需 ROOT 或系统权限。\n\nShell 命令：\nam broadcast -a io.githuh.onehandedmode.action.START -p com.android.systemui\n\n默认贴右侧，命令末尾加 --es side left 可贴左侧，--es side right 则贴右侧。沿用当前缩放比例，重复调用会保持已开启的单手模式。和手势呼出一样，需要手机已解锁且处于竖屏。</string>
     <string name="open_source">开源项目</string>
     <string name="project">本项目</string>
     <string name="project_source">项目源码</string>

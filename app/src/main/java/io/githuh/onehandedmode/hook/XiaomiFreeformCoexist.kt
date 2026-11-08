@@ -8,7 +8,7 @@ import android.view.InputEvent
 import android.view.MotionEvent
 import io.github.libxposed.api.XposedModule
 
-/** Experimental adapter for the Xiaomi Android 17 multitasking implementation. */
+/** Adapter for the Xiaomi multitasking implementation on systems with com.miui.core. */
 internal class XiaomiFreeformCoexist(
     private val module: XposedModule,
     private val loader: ClassLoader,
@@ -86,7 +86,7 @@ internal class XiaomiFreeformCoexist(
             .forEach { module.deoptimize(it) }
 
         installSidebarAnimation()
-        module.log(Log.INFO, "OneHandedMode", "Xiaomi Android 17 freeform coexistence adapter installed")
+        module.log(Log.INFO, "OneHandedMode", "Xiaomi freeform coexistence adapter installed")
     }
 
     private fun installSidebarAnimation() {

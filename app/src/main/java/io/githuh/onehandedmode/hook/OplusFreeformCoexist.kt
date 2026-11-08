@@ -3,7 +3,6 @@ package io.githuh.onehandedmode.hook
 import android.app.ActivityManager
 import android.content.Context
 import android.net.Uri
-import android.os.Build
 import android.util.Log
 import android.view.InputEvent
 import android.view.MotionEvent
@@ -11,12 +10,15 @@ import android.view.WindowManager
 import io.githuh.onehandedmode.HandySettings
 import io.github.libxposed.api.XposedModule
 
-/** Adapter for the OnePlus Android 17 FlexibleTask and Smart Sidebar implementations. */
+/** Adapter for the FlexibleTask and Smart Sidebar implementations. */
 internal class OplusFreeformCoexist(
     private val module: XposedModule,
     private val loader: ClassLoader,
 ) {
-    fun installSystemServer() {
+    fun installSystemServer(context: Context) {
+        // Installation is deferred until system services have started, so initialize the
+        // coordinate space here instead of waiting for the observer's already completed init.
+        val space = OplusHandySpace(context, module.getRemotePreferences(HandySettings.GROUP))
         val observer = Class.forName("com.android.server.wm.OplusZoomSettingsObserver", false, loader)
         val update = observer.getDeclaredMethod("updateOneHandedMode")
         val oneHandedPolicy = observer.getDeclaredField("mOneHeadMode").apply { isAccessible = true }
@@ -31,16 +33,6 @@ internal class OplusFreeformCoexist(
             "com.android.server.wm.OplusZoomSettingsObserver\$SettingsObserver", false, loader,
         ).getDeclaredMethod("onChange", Boolean::class.javaPrimitiveType!!, Uri::class.java,
             Int::class.javaPrimitiveType!!))
-
-        lateinit var space: OplusHandySpace
-        val init = observer.getDeclaredMethod("init", type("FlexibleTaskController"))
-        module.deoptimize(init)
-        module.hook(init).intercept { chain ->
-            val result = chain.proceed()
-            space = OplusHandySpace(chain.thisObject!!.read("mContext") as Context,
-                module.getRemotePreferences(HandySettings.GROUP))
-            result
-        }
 
         // This private receiver compares raw display points with the view's logical region.
         val receive = type("floathandle.FloatHandleView\$2").getDeclaredMethod("onInputEvent", InputEvent::class.java)
@@ -126,11 +118,4 @@ internal class OplusFreeformCoexist(
 
     private fun type(name: String): Class<*> = Class.forName("com.android.server.wm.$name", false, loader)
 
-    companion object {
-        private val isOplusRom = (Class.forName("android.os.SystemProperties")
-            .getDeclaredMethod("get", String::class.java)
-            .invoke(null, "ro.build.version.oplusrom") as String).isNotEmpty()
-        fun isTargetSystem(): Boolean = Build.VERSION.SDK_INT == 37 &&
-            Build.MANUFACTURER.equals("OnePlus", ignoreCase = true) && isOplusRom
-    }
 }

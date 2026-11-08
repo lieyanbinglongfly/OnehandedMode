@@ -4,7 +4,9 @@ import android.animation.ValueAnimator
 import android.animation.Animator
 import android.app.Application
 import android.content.ContentResolver
-import android.os.Build
+import android.content.Context
+import android.os.Handler
+import android.os.Process
 import android.provider.Settings
 import android.util.Log
 import android.view.InputEvent
@@ -17,13 +19,15 @@ import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 import io.github.libxposed.api.XposedModuleInterface.SystemServerStartingParam
 import kotlin.math.sqrt
+import kotlin.concurrent.thread
 
 private class AnimationSurface(val leash: SurfaceControl, val offsetBias: Float)
 
 class OneHandedModule : XposedModule() {
     private lateinit var runtime: HandyRuntime
     private var screenshotBackgroundParent: SurfaceControl? = null
-    private var freeformCoexistEnabled = false
+    @Volatile private var freeformCoexistEnabled = false
+    @Volatile private var hasOplusSidebar = false
     private var systemUiHooksInstalled = false
     private var platformSupportInstalled = false
 
@@ -33,14 +37,26 @@ class OneHandedModule : XposedModule() {
     }
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
-        if (OplusFreeformCoexist.isTargetSystem()) {
-            OplusFreeformCoexist(this, param.classLoader).installSystemServer()
+        // Finish starting system services before querying packages. Package scanning and
+        // optional adapter installation run off the system_server main thread.
+        val server = Class.forName("com.android.server.SystemServer", false, param.classLoader)
+        val startOtherServices = server.declaredMethods.single { it.name == "startOtherServices" }
+        deoptimize(startOtherServices)
+        hook(startOtherServices).intercept { chain ->
+            val result = chain.proceed()
+            val context = chain.thisObject!!.read("mSystemContext") as Context
+            thread(name = "OneHanded-packages") {
+                Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+                if ("com.coloros.smartsidebar" in installedPackages(context)) {
+                    OplusFreeformCoexist(this, param.classLoader).installSystemServer(context)
+                }
+            }
+            result
         }
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
-        if (param.isFirstPackage && param.packageName == "com.coloros.smartsidebar" &&
-            OplusFreeformCoexist.isTargetSystem()) {
+        if (param.isFirstPackage && param.packageName == "com.coloros.smartsidebar") {
             OplusFreeformCoexist(this, param.classLoader).installSidebar()
         }
         if (param.packageName != "com.android.systemui" || systemUiHooksInstalled) return
@@ -78,9 +94,16 @@ class OneHandedModule : XposedModule() {
                 val result = chain.proceed()
                 runtime = HandyRuntime(chain.thisObject!!, preferences) { screenshotBackgroundParent }
                 runtime.attach()
-                if (OplusFreeformCoexist.isTargetSystem()) {
-                    chain.thisObject!!.read("mTaskStackListenerCallback")!!.javaClass.declaredMethods
-                        .forEach { deoptimize(it) }
+                val instance = chain.thisObject!!
+                val handler = instance.read("mMainHandler") as Handler
+                // Queue detection after controller initialization; the package query runs
+                // on a background thread and adapter installation returns to the shell thread.
+                handler.post {
+                    thread(name = "OneHanded-packages") {
+                        Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+                        val packages = installedPackages(instance.read("mContext") as Context)
+                        handler.post { installFreeformHooks(loader, instance, packages) }
+                    }
                 }
                 log(Log.INFO, "OneHandedMode", "Controller attached")
                 result
@@ -98,7 +121,7 @@ class OneHandedModule : XposedModule() {
                     !freeformCoexistEnabled && runtime.hasVisibleFreeformTask()
                 else -> true
             }
-            if (OplusFreeformCoexist.isTargetSystem()) {
+            if (hasOplusSidebar) {
                 log(Log.DEBUG, "OneHandedMode", "OnePlus exit request: reason=$reason, accepted=$shouldStop")
             }
             if (!shouldStop || runtime.deferExit()) null else chain.proceed()
@@ -170,29 +193,40 @@ class OneHandedModule : XposedModule() {
             }
             result
         }
-        if (Build.VERSION.SDK_INT == 37 && Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)) {
-            val root = Class.forName("com.android.wm.shell.RootDisplayAreaOrganizer", false, loader)
-            val info = Class.forName("android.window.DisplayAreaInfo", false, loader)
-            val displayId = info.getField("displayId")
-            deoptimize(root.getDeclaredMethod("onInit"))
-            intercept(root, "onDisplayAreaAppeared", info, SurfaceControl::class.java) { chain ->
-                val result = chain.proceed()
-                if (displayId.getInt(chain.getArg(0)) == 0) {
-                    screenshotBackgroundParent = chain.getArg(1) as SurfaceControl
-                }
-                result
+        val root = Class.forName("com.android.wm.shell.RootDisplayAreaOrganizer", false, loader)
+        val info = Class.forName("android.window.DisplayAreaInfo", false, loader)
+        val displayId = info.getField("displayId")
+        root.declaredConstructors.forEach { deoptimize(it) }
+        root.declaredMethods.forEach { deoptimize(it) }
+        intercept(root, "onDisplayAreaAppeared", info, SurfaceControl::class.java) { chain ->
+            val result = chain.proceed()
+            if (displayId.getInt(chain.getArg(0)) == 0) {
+                screenshotBackgroundParent = chain.getArg(1) as SurfaceControl
             }
-            XiaomiFreeformCoexist(this, loader) { runtime }.install()
-            freeformCoexistEnabled = true
-        }
-        if (OplusFreeformCoexist.isTargetSystem()) {
-            OplusFreeformCoexist(this, loader).installSystemUi()
-            freeformCoexistEnabled = true
+            result
         }
         log(Log.INFO, "OneHandedMode", "Hooks installed at framework and callback boundaries")
         NavigationGestureMode(this, loader, preferences).install()
         log(Log.INFO, "OneHandedMode", "Navigation gesture hooks installed")
     }
+
+    private fun installFreeformHooks(loader: ClassLoader, controller: Any, packages: Set<String>) {
+        if ("com.miui.core" in packages) {
+            XiaomiFreeformCoexist(this, loader) { runtime }.install()
+            freeformCoexistEnabled = true
+        }
+        if ("com.coloros.smartsidebar" in packages) {
+            controller.read("mTaskStackListenerCallback")!!.javaClass.declaredMethods
+                .forEach { deoptimize(it) }
+            OplusFreeformCoexist(this, loader).installSystemUi()
+            hasOplusSidebar = true
+            freeformCoexistEnabled = true
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun installedPackages(context: Context): Set<String> =
+        context.packageManager.getInstalledApplications(0).mapTo(HashSet()) { it.packageName }
 
     private fun enablePlatformSupport() {
         if (platformSupportInstalled) return

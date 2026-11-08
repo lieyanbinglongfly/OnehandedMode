@@ -1,17 +1,12 @@
 package io.githuh.onehandedmode.hook
 
 import android.content.Context
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.RectF
-import android.os.Build
 import android.os.Handler
 import android.view.Gravity
 import android.view.MotionEvent
-import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.core.view.doOnNextLayout
@@ -33,8 +28,6 @@ internal class HandySurround(
     private val density = context.resources.displayMetrics.density
     private val buttonSize = (35f * density).roundToInt()
     private val edge = 20f * density
-    private val useCornerWindow = Build.VERSION.SDK_INT != 37 ||
-        !Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)
     private var prepared = false
     private var showing = false
     private var right = true
@@ -49,14 +42,10 @@ internal class HandySurround(
     private lateinit var settingsButton: MiuixSettingsButton
     private val topView = SurroundView()
     private val sideView = SurroundView()
-    private val cornersView = CornerFillView(windowContext)
     private val topParams = params("MIUI one-handed top")
     private val sideParams = params("MIUI one-handed side")
-    private val cornersParams = params("MIUI one-handed corner background").apply {
-        flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-    }
 
-    fun show(screen: ScreenSpec, scale: Float, anchorRight: Boolean, color: Int, radius: Float) {
+    fun show(screen: ScreenSpec, scale: Float, anchorRight: Boolean, color: Int) {
         uiHandler.post {
             width = screen.width
             height = screen.height
@@ -74,11 +63,6 @@ internal class HandySurround(
             sideParams.width = side
             sideParams.height = height - top
             sideParams.flags = sideParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-            cornersParams.x = if (right) side else 0
-            cornersParams.y = top
-            cornersParams.width = width - side
-            cornersParams.height = height - top
-            cornersView.setCorners(color, radius * visualScale)
             buttonParams.bottomMargin = ((gapWidth - buttonSize) / 2f).roundToInt()
             topView.setBackgroundColor(color)
             sideView.setBackgroundColor(color)
@@ -100,10 +84,6 @@ internal class HandySurround(
             sideView.addView(settingsButton.view, buttonParams)
             windowManager.addView(topView, topParams)
             windowManager.addView(sideView, sideParams)
-            if (useCornerWindow) {
-                cornersView.alpha = 1f
-                windowManager.addView(cornersView, cornersParams)
-            }
             settingsButton.start()
             showing = true
             entryFinished = true
@@ -120,7 +100,6 @@ internal class HandySurround(
         uiHandler.post {
             if (!showing) return@post
             entryFinished = false
-            cornersView.alpha = 0f
             // Keep only the fading button above the growing content. The background surface
             // fills the surround, and the two windows stop intercepting touches immediately.
             topView.setBackgroundColor(Color.TRANSPARENT)
@@ -147,38 +126,8 @@ internal class HandySurround(
         settingsButton.dispose()
         windowManager.removeViewImmediate(topView)
         windowManager.removeViewImmediate(sideView)
-        if (useCornerWindow) windowManager.removeViewImmediate(cornersView)
         sideView.removeAllViews()
         showing = false
-    }
-
-    private class CornerFillView(context: Context) : View(context) {
-        private val path = Path()
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private var radius = 0f
-
-        fun setCorners(color: Int, cornerRadius: Float) {
-            paint.color = color
-            radius = cornerRadius
-            updatePath(width, height)
-            invalidate()
-        }
-
-        override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
-            updatePath(width, height)
-        }
-
-        private fun updatePath(width: Int, height: Int) {
-            path.reset()
-            path.fillType = Path.FillType.EVEN_ODD
-            val bounds = RectF(0f, 0f, width.toFloat(), height.toFloat())
-            path.addRect(bounds, Path.Direction.CW)
-            path.addRoundRect(bounds, radius, radius, Path.Direction.CW)
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            canvas.drawPath(path, paint)
-        }
     }
 
     private fun params(title: String) = WindowManager.LayoutParams(

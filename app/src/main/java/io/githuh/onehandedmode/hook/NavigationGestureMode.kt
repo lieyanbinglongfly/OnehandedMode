@@ -42,6 +42,14 @@ internal class NavigationGestureMode(
             .filterNot { Modifier.isAbstract(it.modifiers) }
             .forEach { module.deoptimize(it) }
         serviceType.declaredConstructors.forEach { module.deoptimize(it) }
+        // ART can inline the callback and notifier into commitUpdate. Deoptimizing only
+        // the callees does not remove that compiled caller. Older systems keep state in
+        // SysUiState itself; newer systems expose an interface backed by SysUiStateImpl.
+        val state = type("com.android.systemui.model.SysUiState")
+        val stateImplementation = if (state.isInterface) type("com.android.systemui.model.SysUiStateImpl") else state
+        stateImplementation.declaredMethods.filterNot { Modifier.isAbstract(it.modifiers) }
+            .forEach { module.deoptimize(it) }
+        stateImplementation.declaredConstructors.forEach { module.deoptimize(it) }
         module.hook(notify).intercept { chain ->
             if (notify.parameterCount == 2 && chain.getArg(1 - flagsIndex) != Display.DEFAULT_DISPLAY) {
                 chain.proceed()

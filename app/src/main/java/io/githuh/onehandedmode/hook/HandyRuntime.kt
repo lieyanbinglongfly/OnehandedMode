@@ -52,7 +52,7 @@ internal class HandyRuntime(
     private var entryTime = 0L
     private var lastSurroundOffset = Float.NaN
     private var cornerRadius = 0f
-    private var hiddenBarGesture: XiaomiHiddenBarGesture? = null
+    private lateinit var hiddenBarGesture: XiaomiHiddenBarGesture
 
     private val matrix = SurfaceControl.Transaction::class.java.getDeclaredMethod(
         "setMatrix", SurfaceControl::class.java,
@@ -112,15 +112,13 @@ internal class HandyRuntime(
         } else {
             context.registerReceiver(externalStartReceiver, startFilter, null, handler)
         }
-        if (Build.VERSION.SDK_INT == 37 && Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)) {
-            val pilfer = Class.forName("android.view.InputMonitor").getDeclaredMethod("pilferPointers")
-            hiddenBarGesture = XiaomiHiddenBarGesture(
-                context, handler,
-                canStart = { state == 0 && canEnter() },
-                pilferPointers = { pilfer.invoke(controller.read("mTouchHandler")!!.read("mInputMonitor")); Unit },
-                startOneHanded = { controller.call("startOneHanded"); Unit },
-            )
-        }
+        val pilfer = Class.forName("android.view.InputMonitor").getDeclaredMethod("pilferPointers")
+        hiddenBarGesture = XiaomiHiddenBarGesture(
+            context, handler,
+            canStart = { state == 0 && canEnter() },
+            pilferPointers = { pilfer.invoke(controller.read("mTouchHandler")!!.read("mInputMonitor")); Unit },
+            startOneHanded = { controller.call("startOneHanded"); Unit },
+        )
         handler.post { applySettings() }
     }
 
@@ -182,7 +180,6 @@ internal class HandyRuntime(
     }
 
     private fun canEnter(): Boolean = display.rotation == Surface.ROTATION_0 &&
-        context.resources.configuration.smallestScreenWidthDp < 600 &&
         !context.getSystemService(KeyguardManager::class.java).isKeyguardLocked &&
         Settings.Global.getInt(context.contentResolver, Settings.Global.DEVICE_PROVISIONED, 0) != 0
 
@@ -243,7 +240,7 @@ internal class HandyRuntime(
                 entryTime = SystemClock.elapsedRealtime()
                 val color = backgroundColor()
                 background.prepare(screen, color, backgroundParent())
-                overlay.show(screen, scale, right, color, cornerRadius)
+                overlay.show(screen, scale, right, color)
                 publishMode(if (right) 2 else 1)
             }
             2 -> {
@@ -289,7 +286,7 @@ internal class HandyRuntime(
 
     fun onMotionEvent(event: MotionEvent) {
         if (state == 0 && event.actionMasked == MotionEvent.ACTION_DOWN) downX = event.rawX
-        hiddenBarGesture?.onMotionEvent(event, screen.height)
+        hiddenBarGesture.onMotionEvent(event, screen.height)
     }
 
     fun transform(tx: SurfaceControl.Transaction, leash: SurfaceControl, offset: Float): PointF {

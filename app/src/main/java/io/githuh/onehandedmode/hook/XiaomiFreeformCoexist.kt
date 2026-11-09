@@ -6,6 +6,8 @@ import android.provider.Settings
 import android.util.Log
 import android.view.InputEvent
 import android.view.MotionEvent
+import dalvik.system.BaseDexClassLoader
+import dalvik.system.DexFile
 import io.github.libxposed.api.XposedModule
 
 /** Adapter for the Xiaomi multitasking implementation on systems with com.miui.core. */
@@ -18,7 +20,7 @@ internal class XiaomiFreeformCoexist(
     private val logicalInputDispatch = ThreadLocal<Boolean>()
     private val sidebarCoverInit = ThreadLocal<Boolean>()
 
-    fun install() {
+    fun install(hasLinkageAnimation: Boolean) {
         val settings = type("common.MultiTaskingSettingsObserver")
         val changed = settings.getDeclaredMethod("onOneHandleModeChanged")
         module.deoptimize(changed)
@@ -85,8 +87,25 @@ internal class XiaomiFreeformCoexist(
         type("miuimultiwinswitch.miuiwindowdecor.MulWinSwitchEventHandler").declaredMethods
             .forEach { module.deoptimize(it) }
 
-        installSidebarAnimation()
-        module.log(Log.INFO, "OneHandedMode", "Xiaomi freeform coexistence adapter installed")
+        // Older multitasking shells have no linkage animation subsystem. Their common
+        // settings/input hooks above still apply; keep the newer animation hooks intact.
+        if (hasLinkageAnimation) installSidebarAnimation()
+        module.log(Log.INFO, "OneHandedMode", "Xiaomi freeform coexistence adapter installed, linkageAnimation=$hasLinkageAnimation")
+    }
+
+    @Suppress("DEPRECATION")
+    fun hasLinkageAnimation(): Boolean {
+        // Inspect the defining shell loader's existing dex files without loading an absent
+        // class. This runs during the background package query, before installing hooks.
+        val shellLoader = type("common.MultiTaskingSettingsObserver").classLoader
+        val pathList = BaseDexClassLoader::class.java.getDeclaredField("pathList")
+            .apply { isAccessible = true }.get(shellLoader)!!
+        val elements = pathList.read("dexElements") as Array<*>
+        val name = "com.android.wm.shell.multitasking.common.linkage.MultiTaskingLinkageTransition"
+        return elements.any { element ->
+            val dex = element!!.read("dexFile") as DexFile?
+            dex?.entries()?.asSequence()?.any { it == name } == true
+        }
     }
 
     private fun installSidebarAnimation() {

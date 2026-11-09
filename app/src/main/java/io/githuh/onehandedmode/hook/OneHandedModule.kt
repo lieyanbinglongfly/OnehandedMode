@@ -13,6 +13,7 @@ import android.view.InputEvent
 import android.view.MotionEvent
 import android.view.SurfaceControl
 import io.githuh.onehandedmode.HandySettings
+import io.githuh.onehandedmode.BuildConfig
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
@@ -32,7 +33,8 @@ class OneHandedModule : XposedModule() {
     private var platformSupportInstalled = false
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
-        log(Log.INFO, "OneHandedMode", "Module loaded: process=${param.processName}, systemServer=${param.isSystemServer}")
+        log(Log.INFO, "OneHandedMode", "Module loaded: version=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE}), " +
+            "process=${param.processName}, systemServer=${param.isSystemServer}")
         if (param.isSystemServer || param.processName == "com.android.systemui") enablePlatformSupport()
     }
 
@@ -102,7 +104,11 @@ class OneHandedModule : XposedModule() {
                     thread(name = "OneHanded-packages") {
                         Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
                         val packages = installedPackages(instance.read("mContext") as Context)
-                        handler.post { installFreeformHooks(loader, instance, packages) }
+                        val xiaomi = if ("com.miui.core" in packages) {
+                            XiaomiFreeformCoexist(this, loader) { runtime }
+                        } else null
+                        val hasLinkageAnimation = xiaomi?.hasLinkageAnimation() == true
+                        handler.post { installFreeformHooks(loader, instance, packages, xiaomi, hasLinkageAnimation) }
                     }
                 }
                 log(Log.INFO, "OneHandedMode", "Controller attached")
@@ -210,9 +216,15 @@ class OneHandedModule : XposedModule() {
         log(Log.INFO, "OneHandedMode", "Navigation gesture hooks installed")
     }
 
-    private fun installFreeformHooks(loader: ClassLoader, controller: Any, packages: Set<String>) {
-        if ("com.miui.core" in packages) {
-            XiaomiFreeformCoexist(this, loader) { runtime }.install()
+    private fun installFreeformHooks(
+        loader: ClassLoader,
+        controller: Any,
+        packages: Set<String>,
+        xiaomi: XiaomiFreeformCoexist?,
+        hasLinkageAnimation: Boolean,
+    ) {
+        if (xiaomi != null) {
+            xiaomi.install(hasLinkageAnimation)
             freeformCoexistEnabled = true
         }
         if ("com.coloros.smartsidebar" in packages) {

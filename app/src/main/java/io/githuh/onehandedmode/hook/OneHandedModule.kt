@@ -39,18 +39,22 @@ class OneHandedModule : XposedModule() {
     }
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
-        // Finish starting system services before querying packages. Package scanning and
-        // optional adapter installation run off the system_server main thread.
+        // Finish starting system services before probing optional vendor adapters. Reflection
+        // and adapter installation run off the system_server main thread.
         val server = Class.forName("com.android.server.SystemServer", false, param.classLoader)
         val startOtherServices = server.declaredMethods.single { it.name == "startOtherServices" }
         deoptimize(startOtherServices)
         hook(startOtherServices).intercept { chain ->
             val result = chain.proceed()
             val context = chain.thisObject!!.read("mSystemContext") as Context
-            thread(name = "OneHanded-packages") {
+            thread(name = "OneHanded-adapters") {
                 Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
-                if ("com.coloros.smartsidebar" in installedPackages(context)) {
-                    OplusFreeformCoexist(this, param.classLoader).installSystemServer(context)
+                runCatching {
+                    if (OplusFreeformCoexist.isSystemServerAvailable(param.classLoader)) {
+                        OplusFreeformCoexist(this, param.classLoader).installSystemServer(context)
+                    }
+                }.onFailure { error ->
+                    log(Log.ERROR, "OneHandedMode", "Skipping OnePlus system-server adapter", error)
                 }
             }
             result
@@ -58,8 +62,13 @@ class OneHandedModule : XposedModule() {
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
-        if (param.isFirstPackage && param.packageName == "com.coloros.smartsidebar") {
-            OplusFreeformCoexist(this, param.classLoader).installSidebar()
+        if (param.isFirstPackage && param.packageName == "com.coloros.smartsidebar" &&
+            OplusFreeformCoexist.isSidebarAvailable(param.classLoader)) {
+            runCatching {
+                OplusFreeformCoexist(this, param.classLoader).installSidebar()
+            }.onFailure { error ->
+                log(Log.ERROR, "OneHandedMode", "Skipping OnePlus sidebar adapter", error)
+            }
         }
         if (param.packageName != "com.android.systemui" || systemUiHooksInstalled) return
         val process = Application.getProcessName()
@@ -98,17 +107,27 @@ class OneHandedModule : XposedModule() {
                 runtime.attach()
                 val instance = chain.thisObject!!
                 val handler = instance.read("mMainHandler") as Handler
-                // Queue detection after controller initialization; the package query runs
+                // Queue capability detection after controller initialization. Reflection runs
                 // on a background thread and adapter installation returns to the shell thread.
                 handler.post {
-                    thread(name = "OneHanded-packages") {
+                    thread(name = "OneHanded-adapters") {
                         Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
-                        val packages = installedPackages(instance.read("mContext") as Context)
-                        val xiaomi = if ("com.miui.core" in packages) {
+                        val hasOplusSystemUi = OplusFreeformCoexist.isSystemUiAvailable(loader)
+                        val xiaomi = if (XiaomiFreeformCoexist.isAvailable(loader)) {
                             XiaomiFreeformCoexist(this, loader) { runtime }
                         } else null
-                        val hasLinkageAnimation = xiaomi?.hasLinkageAnimation() == true
-                        handler.post { installFreeformHooks(loader, instance, packages, xiaomi, hasLinkageAnimation) }
+                        val hasLinkageAnimation = xiaomi?.let { adapter ->
+                            runCatching { adapter.hasLinkageAnimation() }
+                                .onFailure { error ->
+                                    log(Log.WARN, "OneHandedMode", "Xiaomi linkage detection failed", error)
+                                }
+                                .getOrDefault(false)
+                        } == true
+                        handler.post {
+                            installFreeformHooks(
+                                loader, instance, hasOplusSystemUi, xiaomi, hasLinkageAnimation,
+                            )
+                        }
                     }
                 }
                 log(Log.INFO, "OneHandedMode", "Controller attached")
@@ -219,26 +238,32 @@ class OneHandedModule : XposedModule() {
     private fun installFreeformHooks(
         loader: ClassLoader,
         controller: Any,
-        packages: Set<String>,
+        hasOplusSystemUi: Boolean,
         xiaomi: XiaomiFreeformCoexist?,
         hasLinkageAnimation: Boolean,
     ) {
         if (xiaomi != null) {
-            xiaomi.install(hasLinkageAnimation)
-            freeformCoexistEnabled = true
+            runCatching {
+                xiaomi.install(hasLinkageAnimation)
+            }.onSuccess {
+                freeformCoexistEnabled = true
+            }.onFailure { error ->
+                log(Log.ERROR, "OneHandedMode", "Skipping Xiaomi freeform adapter", error)
+            }
         }
-        if ("com.coloros.smartsidebar" in packages) {
-            controller.read("mTaskStackListenerCallback")!!.javaClass.declaredMethods
-                .forEach { deoptimize(it) }
-            OplusFreeformCoexist(this, loader).installSystemUi()
-            hasOplusSidebar = true
-            freeformCoexistEnabled = true
+        if (hasOplusSystemUi) {
+            runCatching {
+                controller.read("mTaskStackListenerCallback")!!.javaClass.declaredMethods
+                    .forEach { deoptimize(it) }
+                OplusFreeformCoexist(this, loader).installSystemUi()
+            }.onSuccess {
+                hasOplusSidebar = true
+                freeformCoexistEnabled = true
+            }.onFailure { error ->
+                log(Log.ERROR, "OneHandedMode", "Skipping OnePlus SystemUI adapter", error)
+            }
         }
     }
-
-    @Suppress("DEPRECATION")
-    private fun installedPackages(context: Context): Set<String> =
-        context.packageManager.getInstalledApplications(0).mapTo(HashSet()) { it.packageName }
 
     private fun enablePlatformSupport() {
         if (platformSupportInstalled) return

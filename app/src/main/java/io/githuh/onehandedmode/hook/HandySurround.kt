@@ -1,7 +1,6 @@
 package io.githuh.onehandedmode.hook
 
 import android.content.Context
-import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.os.Handler
@@ -45,7 +44,7 @@ internal class HandySurround(
     private val topParams = params("MIUI one-handed top")
     private val sideParams = params("MIUI one-handed side")
 
-    fun show(screen: ScreenSpec, scale: Float, anchorRight: Boolean, color: Int) {
+    fun show(screen: ScreenSpec, scale: Float, anchorRight: Boolean) {
         uiHandler.post {
             width = screen.width
             height = screen.height
@@ -64,12 +63,10 @@ internal class HandySurround(
             sideParams.height = height - top
             sideParams.flags = sideParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
             buttonParams.bottomMargin = ((gapWidth - buttonSize) / 2f).roundToInt()
-            topView.setBackgroundColor(color)
-            sideView.setBackgroundColor(color)
             entryFinished = false
             prepared = true
-            // During entry the synchronized color layer fills the exposed display. No window
-            // relayouts, buffer resizing or Compose creation are scheduled from animation frames.
+            // The synchronized color layer remains the only visible surround background for the
+            // entire session. These transparent windows provide touch handling and the button.
         }
     }
 
@@ -100,10 +97,7 @@ internal class HandySurround(
         uiHandler.post {
             if (!showing) return@post
             entryFinished = false
-            // Keep only the fading button above the growing content. The background surface
-            // fills the surround, and the two windows stop intercepting touches immediately.
-            topView.setBackgroundColor(Color.TRANSPARENT)
-            sideView.setBackgroundColor(Color.TRANSPARENT)
+            // The background surface fills the surround; stop intercepting touches immediately.
             topParams.flags = topParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             sideParams.flags = sideParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             windowManager.updateViewLayout(topView, topParams)

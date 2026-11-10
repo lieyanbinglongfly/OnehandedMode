@@ -32,8 +32,16 @@ internal class OplusSidebarInput(private val module: XposedModule, private val l
 
     fun install() {
         val application = Class.forName("com.coloros.common.App", false, loader)
-        module.deoptimize(application.getDeclaredMethod("onCreate"))
-        module.hook(application.getDeclaredMethod("onCreate")).intercept { chain ->
+        val onCreate = application.getDeclaredMethod("onCreate")
+        val input = Class.forName("com.coloros.edgepanel.scene.subjects.InputEventSubject", false, loader)
+        val receive = input.getDeclaredMethod("handleInputEvent", MotionEvent::class.java)
+        val regionMethods = listOf("registerRegionInputEvent", "updateRegionInputEvent").map { name ->
+            manager.getDeclaredMethod(name, observer, String::class.java, intType, List::class.java)
+        }
+        val unregister = manager.getDeclaredMethod("unregisterRegionInputEvent", observer)
+
+        module.deoptimize(onCreate)
+        module.hook(onCreate).intercept { chain ->
             // ActivityThread has published the initial Application by this point, so Settings
             // can recognize the privileged sidebar app before its input subjects are created.
             space = OplusHandySpace(chain.thisObject as Context, module.getRemotePreferences(HandySettings.GROUP))
@@ -42,8 +50,6 @@ internal class OplusSidebarInput(private val module: XposedModule, private val l
             chain.proceed()
         }
 
-        val input = Class.forName("com.coloros.edgepanel.scene.subjects.InputEventSubject", false, loader)
-        val receive = input.getDeclaredMethod("handleInputEvent", MotionEvent::class.java)
         module.deoptimize(receive)
         module.hook(receive).intercept { chain ->
             if (space.active) space.mapGlobalInput(chain.getArg(0) as MotionEvent)
@@ -52,8 +58,7 @@ internal class OplusSidebarInput(private val module: XposedModule, private val l
 
         // Keep InputUtils' cached rectangle in logical space; only its framework registrations
         // and the region published for SystemUI's edge gestures use physical display space.
-        for (name in listOf("registerRegionInputEvent", "updateRegionInputEvent")) {
-            val method = manager.getDeclaredMethod(name, observer, String::class.java, intType, List::class.java)
+        for (method in regionMethods) {
             module.hook(method).intercept { chain ->
                 if (chain.getArg(1) != "sidebar" || physicalDispatch.get() == true) {
                     chain.proceed()
@@ -68,7 +73,7 @@ internal class OplusSidebarInput(private val module: XposedModule, private val l
                 }
             }
         }
-        module.hook(manager.getDeclaredMethod("unregisterRegionInputEvent", observer)).intercept { chain ->
+        module.hook(unregister).intercept { chain ->
             val result = chain.proceed()
             if (region?.observer === chain.getArg(0)) region = null
             result

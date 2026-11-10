@@ -10,7 +10,7 @@ import dalvik.system.BaseDexClassLoader
 import dalvik.system.DexFile
 import io.github.libxposed.api.XposedModule
 
-/** Adapter for the Xiaomi multitasking implementation on systems with com.miui.core. */
+/** Adapter for Xiaomi's multitasking shell implementation. */
 internal class XiaomiFreeformCoexist(
     private val module: XposedModule,
     private val loader: ClassLoader,
@@ -21,11 +21,35 @@ internal class XiaomiFreeformCoexist(
     private val sidebarCoverInit = ThreadLocal<Boolean>()
 
     fun install(hasLinkageAnimation: Boolean) {
+        // Resolve every required base target before mutating the process. An incomplete or
+        // third-party Xiaomi package must not leave a partially installed adapter behind.
         val settings = type("common.MultiTaskingSettingsObserver")
         val changed = settings.getDeclaredMethod("onOneHandleModeChanged")
+        val intType = Int::class.javaPrimitiveType!!
+        val secureRead = Settings.Secure::class.java.getDeclaredMethod(
+            "getIntForUser", ContentResolver::class.java, String::class.java, intType, intType,
+        )
+        val settingsCallbacks = type("common.MultiTaskingSettingsObserver\$3").declaredMethods
+        val receiver = type("miuimultiwinswitch.miuiwindowdecor.MulWinSwitchEventController\$EventReceiver")
+        val receive = receiver.getDeclaredMethod("onInputEvent", InputEvent::class.java)
+        val floatType = Float::class.javaPrimitiveType!!
+        val exclusionQueries = listOf(
+            "miuifreeform.MiuiFreeformModeGestureHandler",
+            "miuimultiwinswitch.miuiwindowdecor.MulWinSwitchAnimStatus",
+        ).map { name ->
+            val owner = type(name)
+            owner.getDeclaredMethod("isInExcludeRegion", floatType, floatType)
+        }
+        val gestureHandler = type("miuifreeform.MiuiFreeformModeGestureHandler")
+        val handleMotionEvents = gestureHandler.getDeclaredMethod(
+            "handleMotionEvents", MotionEvent::class.java, Class.forName("android.view.InputMonitor"),
+        )
+        val switchEventHandlerMethods =
+            type("miuimultiwinswitch.miuiwindowdecor.MulWinSwitchEventHandler").declaredMethods
+
         module.deoptimize(changed)
         // This is the exact observer that reads the one-handed activation setting on this platform.
-        type("common.MultiTaskingSettingsObserver\$3").declaredMethods.forEach { module.deoptimize(it) }
+        settingsCallbacks.forEach { module.deoptimize(it) }
         module.hook(changed).intercept { chain ->
             multitaskingSettingsRead.set(true)
             try {
@@ -34,20 +58,13 @@ internal class XiaomiFreeformCoexist(
                 multitaskingSettingsRead.remove()
             }
         }
-
-        val intType = Int::class.javaPrimitiveType!!
-        module.hook(Settings.Secure::class.java.getDeclaredMethod(
-            "getIntForUser", ContentResolver::class.java, String::class.java, intType, intType,
-        )).intercept { chain ->
+        module.hook(secureRead).intercept { chain ->
             if (chain.getArg(1) == "one_handed_mode_activated" && multitaskingSettingsRead.get() == true) {
                 // Only Xiaomi's multitasking subsystem sees coexistence; the actual setting and
                 // Google's one-handed state, launcher flags and gesture lifecycle remain active.
                 0
             } else chain.proceed()
         }
-
-        val receiver = type("miuimultiwinswitch.miuiwindowdecor.MulWinSwitchEventController\$EventReceiver")
-        val receive = receiver.getDeclaredMethod("onInputEvent", InputEvent::class.java)
         module.deoptimize(receive)
         module.hook(receive).intercept { chain ->
             val event = chain.getArg(0)
@@ -66,13 +83,7 @@ internal class XiaomiFreeformCoexist(
 
         // WindowManager publishes exclusion regions in physical display space. Query those
         // regions using physical points while the gesture handlers operate in task space.
-        val floatType = Float::class.javaPrimitiveType!!
-        for (name in listOf(
-            "miuifreeform.MiuiFreeformModeGestureHandler",
-            "miuimultiwinswitch.miuiwindowdecor.MulWinSwitchAnimStatus",
-        )) {
-            val owner = type(name)
-            val query = owner.getDeclaredMethod("isInExcludeRegion", floatType, floatType)
+        for (query in exclusionQueries) {
             module.deoptimize(query)
             module.hook(query).intercept { chain ->
                 if (logicalInputDispatch.get() == true) {
@@ -81,22 +92,27 @@ internal class XiaomiFreeformCoexist(
                 } else chain.proceed()
             }
         }
-        type("miuifreeform.MiuiFreeformModeGestureHandler").getDeclaredMethod(
-            "handleMotionEvents", MotionEvent::class.java, Class.forName("android.view.InputMonitor"),
-        ).let { module.deoptimize(it) }
-        type("miuimultiwinswitch.miuiwindowdecor.MulWinSwitchEventHandler").declaredMethods
-            .forEach { module.deoptimize(it) }
+        module.deoptimize(handleMotionEvents)
+        switchEventHandlerMethods.forEach { module.deoptimize(it) }
 
-        // Older multitasking shells have no linkage animation subsystem. Their common
-        // settings/input hooks above still apply; keep the newer animation hooks intact.
-        if (hasLinkageAnimation) installSidebarAnimation()
-        module.log(Log.INFO, "OneHandedMode", "Xiaomi freeform coexistence adapter installed, linkageAnimation=$hasLinkageAnimation")
+        // Older multitasking shells have no linkage animation subsystem. A changed optional
+        // animation API must not disable the already validated common settings/input adapter.
+        val linkageInstalled = hasLinkageAnimation && runCatching {
+            installSidebarAnimation()
+        }.onFailure { error ->
+            module.log(Log.WARN, "OneHandedMode", "Skipping Xiaomi linkage animation adapter", error)
+        }.isSuccess
+        module.log(
+            Log.INFO,
+            "OneHandedMode",
+            "Xiaomi freeform coexistence adapter installed, linkageAnimation=$linkageInstalled",
+        )
     }
 
     @Suppress("DEPRECATION")
     fun hasLinkageAnimation(): Boolean {
         // Inspect the defining shell loader's existing dex files without loading an absent
-        // class. This runs during the background package query, before installing hooks.
+        // class. This runs during background capability detection, before installing hooks.
         val shellLoader = type("common.MultiTaskingSettingsObserver").classLoader
         val pathList = BaseDexClassLoader::class.java.getDeclaredField("pathList")
             .apply { isAccessible = true }.get(shellLoader)!!
@@ -112,14 +128,29 @@ internal class XiaomiFreeformCoexist(
         val intType = Int::class.javaPrimitiveType!!
         val booleanType = Boolean::class.javaPrimitiveType!!
         val transition = type("common.linkage.MultiTaskingLinkageTransition")
+        val session = type("common.linkage.MultiTaskingLinkageSession\$LinkageSession")
         val initCover = transition.getDeclaredMethod(
-            "initCoverLayerCommon", type("common.linkage.MultiTaskingLinkageSession\$LinkageSession"),
-            Bitmap::class.java, intType, booleanType, booleanType,
+            "initCoverLayerCommon", session, Bitmap::class.java, intType, booleanType, booleanType,
         )
+        val parent = type("common.cover.MultiTaskingCoverLayerParent")
+        val taskParent = parent.getDeclaredMethod("getCoverLayerParent")
+        val taskTopParent = parent.getDeclaredMethod("getCoverLayerTopParent")
+        val initIconShape = type("common.cover.MultiTaskingCoverLayerController").getDeclaredMethod(
+            "initIconShape", type("common.cover.MultiTaskingShapeAnimInfo"), Float::class.javaPrimitiveType!!,
+        )
+        val animationCallback = type("common.IMultiTaskingAnimationStateCallback")
+        // Deoptimize the caller so ART's inlined private initialization reaches the scoped hook.
+        val startSidebar = transition.getDeclaredMethod(
+            "startSidebarLaunchFreeform", android.app.PendingIntent::class.java, intType,
+            String::class.java, String::class.java, Bitmap::class.java, android.graphics.Rect::class.java,
+            Float::class.javaPrimitiveType!!, intType, intType, animationCallback,
+        )
+
+        // All optional targets are resolved above before any linkage hooks are installed.
         module.deoptimize(initCover)
         module.hook(initCover).intercept { chain ->
-            val session = chain.getArg(0)!!
-            if (session.read("linkageWay") == "SidebarFreeForm" && runtime().isOneHandedActive()) {
+            val linkageSession = chain.getArg(0)!!
+            if (linkageSession.read("linkageWay") == "SidebarFreeForm" && runtime().isOneHandedActive()) {
                 sidebarCoverInit.set(true)
                 try {
                     chain.proceed()
@@ -132,23 +163,23 @@ internal class XiaomiFreeformCoexist(
         // initIconShape normally lifts only the icon to MaskTopParent, outside the one-handed
         // display area. Keep this sidebar icon with its snapshot and dark layers in MaskParent;
         // their native animation coordinates then inherit the same display transform throughout.
-        val parent = type("common.cover.MultiTaskingCoverLayerParent")
-        val taskParent = parent.getDeclaredMethod("getCoverLayerParent")
-        module.hook(parent.getDeclaredMethod("getCoverLayerTopParent")).intercept { chain ->
+        module.hook(taskTopParent).intercept { chain ->
             if (sidebarCoverInit.get() == true) taskParent.invoke(chain.thisObject) else chain.proceed()
         }
-        module.deoptimize(type("common.cover.MultiTaskingCoverLayerController").getDeclaredMethod(
-            "initIconShape", type("common.cover.MultiTaskingShapeAnimInfo"), Float::class.javaPrimitiveType!!,
-        ))
-        // Deoptimize the caller so ART's inlined private initialization reaches the scoped hook.
-        module.deoptimize(transition.getDeclaredMethod(
-            "startSidebarLaunchFreeform", android.app.PendingIntent::class.java, intType,
-            String::class.java, String::class.java, Bitmap::class.java, android.graphics.Rect::class.java,
-            Float::class.javaPrimitiveType!!, intType, intType,
-            type("common.IMultiTaskingAnimationStateCallback"),
-        ))
+        module.deoptimize(initIconShape)
+        module.deoptimize(startSidebar)
     }
 
     private fun type(name: String): Class<*> =
         Class.forName("com.android.wm.shell.multitasking.$name", false, loader)
+
+    companion object {
+        fun isAvailable(loader: ClassLoader): Boolean = runCatching {
+            Class.forName(
+                "com.android.wm.shell.multitasking.common.MultiTaskingSettingsObserver",
+                false,
+                loader,
+            )
+        }.isSuccess
+    }
 }

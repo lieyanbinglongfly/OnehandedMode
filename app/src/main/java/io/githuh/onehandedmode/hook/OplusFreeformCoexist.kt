@@ -16,12 +16,33 @@ internal class OplusFreeformCoexist(
     private val loader: ClassLoader,
 ) {
     fun installSystemServer(context: Context) {
-        // Installation is deferred until system services have started, so initialize the
-        // coordinate space here instead of waiting for the observer's already completed init.
-        val space = OplusHandySpace(context, module.getRemotePreferences(HandySettings.GROUP))
+        // Resolve every vendor target before registering observers or installing hooks.
         val observer = Class.forName("com.android.server.wm.OplusZoomSettingsObserver", false, loader)
         val update = observer.getDeclaredMethod("updateOneHandedMode")
         val oneHandedPolicy = observer.getDeclaredField("mOneHeadMode").apply { isAccessible = true }
+        val settingsChange = Class.forName(
+            "com.android.server.wm.OplusZoomSettingsObserver\$SettingsObserver", false, loader,
+        ).getDeclaredMethod(
+            "onChange", Boolean::class.javaPrimitiveType!!, Uri::class.java, Int::class.javaPrimitiveType!!,
+        )
+        val receive = type("floathandle.FloatHandleView\$2")
+            .getDeclaredMethod("onInputEvent", InputEvent::class.java)
+        val touch = type("FlexibleTaskController\$TouchListener")
+            .getDeclaredMethod("onPointerEvent", MotionEvent::class.java)
+        val pointer = type("FlexiblePointerHandler")
+        val parameters = arrayOf(
+            MotionEvent::class.java, Int::class.javaPrimitiveType!!,
+            Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!, type("FlexibleCaptionView"),
+        )
+        val windowHandlers = listOf(
+            type("floathandle.FloatHandleView").getDeclaredMethod("processTouchEvent", MotionEvent::class.java),
+            pointer.getDeclaredMethod("onInputEvent", *parameters),
+            pointer.getDeclaredMethod("handleScaleHandleEvent", *parameters),
+        )
+
+        // Installation is deferred until system services have started, so initialize the
+        // coordinate space here instead of waiting for the observer's already completed init.
+        val space = OplusHandySpace(context, module.getRemotePreferences(HandySettings.GROUP))
         module.deoptimize(update)
         module.hook(update).intercept { chain ->
             // This native method only updates the small-window policy and minimizes windows.
@@ -29,13 +50,9 @@ internal class OplusFreeformCoexist(
             oneHandedPolicy.setBoolean(chain.thisObject, false)
             null
         }
-        module.deoptimize(Class.forName(
-            "com.android.server.wm.OplusZoomSettingsObserver\$SettingsObserver", false, loader,
-        ).getDeclaredMethod("onChange", Boolean::class.javaPrimitiveType!!, Uri::class.java,
-            Int::class.javaPrimitiveType!!))
+        module.deoptimize(settingsChange)
 
         // This private receiver compares raw display points with the view's logical region.
-        val receive = type("floathandle.FloatHandleView\$2").getDeclaredMethod("onInputEvent", InputEvent::class.java)
         module.deoptimize(receive)
         module.hook(receive).intercept { chain ->
             val event = chain.getArg(0)
@@ -44,8 +61,6 @@ internal class OplusFreeformCoexist(
         }
 
         // PointerEventDispatcher shares its event with other listeners; use a private copy.
-        val touch = type("FlexibleTaskController\$TouchListener")
-            .getDeclaredMethod("onPointerEvent", MotionEvent::class.java)
         module.deoptimize(touch)
         module.hook(touch).intercept { chain ->
             if (!space.active) chain.proceed() else {
@@ -57,14 +72,6 @@ internal class OplusFreeformCoexist(
 
         // These streams come from windows, whose local coordinates already include the inverse
         // surface matrix. Remap raw coordinates while retaining their local coordinates/history.
-        val pointer = type("FlexiblePointerHandler")
-        val parameters = arrayOf(MotionEvent::class.java, Int::class.javaPrimitiveType!!,
-            Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!, type("FlexibleCaptionView"))
-        val windowHandlers = listOf(
-            type("floathandle.FloatHandleView").getDeclaredMethod("processTouchEvent", MotionEvent::class.java),
-            pointer.getDeclaredMethod("onInputEvent", *parameters),
-            pointer.getDeclaredMethod("handleScaleHandleEvent", *parameters),
-        )
         for (method in windowHandlers) {
             module.deoptimize(method)
             module.hook(method).intercept { chain ->
@@ -85,16 +92,20 @@ internal class OplusFreeformCoexist(
         val menu = Class.forName("com.oplus.flexibletask.menu.FlexibleMenuManager", false, loader)
         val show = menu.getDeclaredMethod("showPopupWindowMenu", ActivityManager.RunningTaskInfo::class.java,
             Boolean::class.javaPrimitiveType!!)
-        menu.declaredMethods.forEach { module.deoptimize(it) }
+        val helper = Class.forName("com.oplus.onehanded.OneHandedHelper", false, loader)
+        val isInOneHanded = helper.getDeclaredMethod("isInOneHanded")
+        val getWindowParams = menu.getDeclaredMethod("getWindowParams", Int::class.javaPrimitiveType!!)
+        val menuMethods = menu.declaredMethods
+
+        menuMethods.forEach { module.deoptimize(it) }
         module.hook(show).intercept { chain ->
             showingMenu.set(true)
             try { chain.proceed() } finally { showingMenu.remove() }
         }
-        val helper = Class.forName("com.oplus.onehanded.OneHandedHelper", false, loader)
-        module.hook(helper.getDeclaredMethod("isInOneHanded")).intercept { chain ->
+        module.hook(isInOneHanded).intercept { chain ->
             if (showingMenu.get() == true) false else chain.proceed()
         }
-        module.hook(menu.getDeclaredMethod("getWindowParams", Int::class.javaPrimitiveType!!)).intercept { chain ->
+        module.hook(getWindowParams).intercept { chain ->
             val params = chain.proceed() as WindowManager.LayoutParams
             // NAVIGATION_BAR_PANEL is excluded from the one-handed display area. The native
             // menu already uses APPLICATION_OVERLAY when measuring; keep the visible window
@@ -107,15 +118,44 @@ internal class OplusFreeformCoexist(
 
     fun installSidebar() {
         val settings = Class.forName("com.coloros.common.settingsvalue.CommonSettingsValueProxy", false, loader)
-        module.hook(settings.getDeclaredMethod("getSingleHandModeState", Context::class.java))
-            .intercept { 0 }
+        val getSingleHandMode = settings.getDeclaredMethod("getSingleHandModeState", Context::class.java)
         // The sidebar caches this value in its observer and uses it to hide the entry handle.
-        Class.forName("com.coloros.edgepanel.observers.SingleHandAndroidObserver", false, loader)
-            .declaredMethods.forEach { module.deoptimize(it) }
-        OplusSidebarInput(module, loader).install()
+        val observerMethods = Class.forName(
+            "com.coloros.edgepanel.observers.SingleHandAndroidObserver", false, loader,
+        ).declaredMethods
+        val sidebarInput = OplusSidebarInput(module, loader)
+
+        module.hook(getSingleHandMode).intercept { 0 }
+        observerMethods.forEach { module.deoptimize(it) }
+        sidebarInput.install()
         module.log(Log.INFO, "OneHandedMode", "OnePlus Smart Sidebar coexistence adapter installed")
     }
 
     private fun type(name: String): Class<*> = Class.forName("com.android.server.wm.$name", false, loader)
 
+    companion object {
+        fun isSystemServerAvailable(loader: ClassLoader): Boolean = hasClasses(
+            loader,
+            "com.android.server.wm.OplusZoomSettingsObserver",
+            "com.android.server.wm.FlexibleTaskController",
+        )
+
+        fun isSystemUiAvailable(loader: ClassLoader): Boolean = hasClasses(
+            loader,
+            "com.oplus.flexibletask.menu.FlexibleMenuManager",
+            "com.oplus.onehanded.OneHandedHelper",
+        )
+
+        fun isSidebarAvailable(loader: ClassLoader): Boolean = hasClasses(
+            loader,
+            "com.coloros.common.App",
+            "com.coloros.common.settingsvalue.CommonSettingsValueProxy",
+            "com.coloros.edgepanel.observers.SingleHandAndroidObserver",
+            "com.coloros.edgepanel.scene.subjects.InputEventSubject",
+            "android.os.OplusGestureMonitorManager",
+        )
+
+        private fun hasClasses(loader: ClassLoader, vararg names: String): Boolean =
+            names.all { name -> runCatching { Class.forName(name, false, loader) }.isSuccess }
+    }
 }

@@ -240,7 +240,7 @@ internal class HandyRuntime(
                 entryTime = SystemClock.elapsedRealtime()
                 val color = backgroundColor()
                 background.prepare(screen, color, backgroundParent())
-                overlay.show(screen, scale, right, color)
+                overlay.show(screen, scale, right)
                 publishMode(if (right) 2 else 1)
             }
             2 -> {

@@ -10,8 +10,8 @@ android {
         applicationId = "io.githuh.onehandedmode"
         minSdk = 31
         targetSdk = 37
-        versionCode = 17
-        versionName = "1.0.7"
+        versionCode = 18
+        versionName = "1.0.8"
     }
     buildFeatures {
         compose = true

@@ -28,8 +28,40 @@ internal class NavigationGestureMode(
     private val mirroredNotifications = ConcurrentHashMap<Int, Notification>()
     private val lastTransportStates = ConcurrentHashMap<Int, Int>()
     private lateinit var preferenceListener: SharedPreferences.OnSharedPreferenceChangeListener
+    private var installed = false
+    private var pending: SharedPreferences.OnSharedPreferenceChangeListener? = null
+
+    /**
+     * Installing these hooks requires deoptimizing LauncherProxyService/SysUiStateImpl
+     * class-wide, because ART inlines the notifier and the state setter into their callers.
+     * Those classes sit on the hot path of every SystemUI state update, so deoptimizing them
+     * unconditionally is what made the whole system feel sluggish.
+     *
+     * The feature is off by default, so the hooks are only installed the first time the user
+     * turns "keep Home and Recents gestures" on.
+     */
+    fun installLazy() {
+        if (preferences.getBoolean(HandySettings.KEEP_NAVIGATION_GESTURES, false)) {
+            install()
+            return
+        }
+        val listener = object : SharedPreferences.OnSharedPreferenceChangeListener {
+            override fun onSharedPreferenceChanged(prefs: SharedPreferences, key: String?) {
+                if (key != HandySettings.KEEP_NAVIGATION_GESTURES) return
+                if (!prefs.getBoolean(HandySettings.KEEP_NAVIGATION_GESTURES, false)) return
+                prefs.unregisterOnSharedPreferenceChangeListener(this)
+                pending = null
+                install()
+            }
+        }
+        pending = listener
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        module.log(Log.INFO, "OneHandedMode", "Navigation notifier deferred: setting is off")
+    }
 
     fun install() {
+        if (installed) return
+        installed = true
         // Android 16 QPR renamed OverviewProxyService/IOverviewProxy to LauncherProxyService/
         // ILauncherProxy. Resolve the actual ABI from Recents instead of an SDK minor version.
         val recents = type("com.android.systemui.recents.OverviewProxyRecentsImpl")
@@ -86,7 +118,11 @@ internal class NavigationGestureMode(
             }
         }
 
-        installTransportHook(serviceType, notify, flagsIndex, flagsType)
+        // The transport hook needs BinderProxy.transact and a launcher proxy field that some
+        // ROMs rename. Losing it only costs mirrored-display accuracy, so it must never take
+        // the notifier hook down with it.
+        runCatching { installTransportHook(serviceType, notify, flagsIndex, flagsType) }
+            .onFailure { module.log(Log.WARN, "OneHandedMode", "Navigation transport unavailable: $it") }
 
         // The original notifier owns connection checks and RemoteException handling.
         // Replay its unfiltered arguments when switching modes, including when it was called

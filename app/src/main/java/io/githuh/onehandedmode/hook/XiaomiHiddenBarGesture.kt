@@ -22,9 +22,12 @@ internal class XiaomiHiddenBarGesture(
 ) {
     private val resolver = context.contentResolver
     private val resources = context.resources
+    // The identifiers are resolved once: [onMotionEvent] runs for every touch in SystemUI and a
+    // resource table walk per event is measurable. The values underneath still get re-read.
     private val navigationMode = resources.getIdentifier("config_navBarInteractionMode", "integer", "android")
     private val navigationHeight = resources.getIdentifier("navigation_bar_gesture_height", "dimen", "android")
-    private val largerNavigationHeight = resources.getIdentifier("navigation_bar_gesture_larger_height", "dimen", "android")
+    private val largerNavigationHeight =
+        resources.getIdentifier("navigation_bar_gesture_larger_height", "dimen", "android")
     private val squaredSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat().let { it * it }
     private var hidden = false
     private var forceFsgNavigation = -1

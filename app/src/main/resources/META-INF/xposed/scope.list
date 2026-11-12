@@ -1,4 +1,5 @@
 android
 system
 com.android.systemui
+com.android.settings
 com.coloros.smartsidebar

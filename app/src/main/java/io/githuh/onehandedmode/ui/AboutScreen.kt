@@ -192,6 +192,17 @@ internal fun AboutScreen(onBack: () -> Unit) {
                                                 "https://github.com/wushidia/OnehandedMode".toUri()))
                                         },
                                     )
+                                    // Where this build's source lives: the upstream repository
+                                    // above is the original author's, and these edits are not in it.
+                                    ArrowPreference(
+                                        title = stringResource(R.string.project_source_fork),
+                                        summary = "github.com/lieyanbinglongfly/OnehandedMode",
+                                        insideMargin = PreferencePadding,
+                                        onClick = {
+                                            context.startActivity(Intent(Intent.ACTION_VIEW,
+                                                "https://github.com/lieyanbinglongfly/OnehandedMode/".toUri()))
+                                        },
+                                    )
                                 }
                                 SectionTitle(stringResource(R.string.open_source))
                                 Card(
@@ -210,6 +221,7 @@ internal fun AboutScreen(onBack: () -> Unit) {
                                 ) {
                                     listOf(
                                         "miuix" to "https://github.com/YuKongA/miuix",
+                                        "HyperCeiler" to "https://github.com/ReChronoRain/HyperCeiler",
                                         "Android Open Source Project" to "https://android.googlesource.com/platform/frameworks/base/",
                                     ).forEach { (name, url) ->
                                         ArrowPreference(
